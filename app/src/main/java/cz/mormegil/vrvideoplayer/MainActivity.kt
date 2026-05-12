@@ -29,6 +29,13 @@ import kotlin.math.roundToInt
 class MainActivity : AppCompatActivity(), MediaPlayer.OnVideoSizeChangedListener {
     companion object {
         private const val TAG = "VRVideoPlayer"
+
+        const val EXTRA_RTP_MULTICAST = "rtp_multicast"
+        const val EXTRA_RTP_GROUP = "rtp_group"
+        const val EXTRA_RTP_PORT = "rtp_port"
+        const val EXTRA_RTP_PAYLOAD_TYPE = "rtp_payload_type"
+        const val EXTRA_RTP_WIDTH = "rtp_width"
+        const val EXTRA_RTP_HEIGHT = "rtp_height"
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -38,7 +45,7 @@ class MainActivity : AppCompatActivity(), MediaPlayer.OnVideoSizeChangedListener
 
     private var nativeApp: Long = 0
     private var inputLayout: InputLayout = InputLayout.Mono
-    private var inputMode: InputMode = InputMode.PlainFov
+    private var inputMode: InputMode = InputMode.Equirect360
     private var outputMode: OutputMode = OutputMode.MonoLeft
 
     private var lastTouchCoordinates = arrayOf(1.0f, 0.0f)
@@ -49,10 +56,10 @@ class MainActivity : AppCompatActivity(), MediaPlayer.OnVideoSizeChangedListener
 
         Log.d(TAG, "onCreate()")
 
+        val useRtpMulticast = intent.getBooleanExtra(EXTRA_RTP_MULTICAST, false)
         val videoUri = intent.data
-        if (videoUri == null) {
-            // ? should not happen
-            Log.w(TAG, "No URI for intent")
+        if (!useRtpMulticast && videoUri == null) {
+            Log.w(TAG, "No URI for intent and multicast mode is disabled")
             finish()
             return
         }
@@ -84,11 +91,29 @@ class MainActivity : AppCompatActivity(), MediaPlayer.OnVideoSizeChangedListener
             NativeLibrary.nativeShowProgressBar(nativeApp)
         }
 
-        videoTexturePlayer = VideoTexturePlayer(this, videoUri, this)
+        val multicastConfig = if (useRtpMulticast) {
+            RtpMulticastConfig(
+                group = intent.getStringExtra(EXTRA_RTP_GROUP) ?: "239.0.0.2",
+                port = intent.getIntExtra(EXTRA_RTP_PORT, 5006),
+                payloadType = intent.getIntExtra(EXTRA_RTP_PAYLOAD_TYPE, 97),
+                width = intent.getIntExtra(EXTRA_RTP_WIDTH, 768),
+                height = intent.getIntExtra(EXTRA_RTP_HEIGHT, 384)
+            )
+        } else {
+            null
+        }
+
+        videoTexturePlayer = VideoTexturePlayer(this, videoUri, multicastConfig, this)
 
         controller = Controller(getSystemService(AudioManager::class.java), videoTexturePlayer)
 
         nativeApp = NativeLibrary.nativeInit(this, assets, videoTexturePlayer, controller)
+        NativeLibrary.nativeSetOptions(
+            nativeApp,
+            inputLayout.ordinal,
+            inputMode.ordinal,
+            outputMode.ordinal
+        )
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, binding.root).let { controller ->
